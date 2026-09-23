@@ -1,0 +1,22 @@
+# 数据文件（太大，不上传）
+data/raw/
+data/processed/
+data/streaming/
+
+# Jupyter 检查点
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+
+# macOS
+.DS_Store
+
+# Spark 临时文件
+derby.log
+metastore_db/
+spark-warehouse/
