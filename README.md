@@ -15,7 +15,7 @@ data/processed/trips/       Hive-style partitioned output (pickup_year / pickup_
        ↓
 Kafka broker (tlc-trips)    3-partition topic on localhost:9092
        ↓
-03_spark_streaming.ipynb    Spark Structured Streaming: 30s window aggregations
+03_spark_streaming.ipynb    Spark Structured Streaming: 5-min event-time window aggregations by pickup zone
 ```
 
 ## Tech Stack
