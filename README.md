@@ -31,7 +31,7 @@ Kafka broker (tlc-trips)    3-partition topic on localhost:9092
 |---|---|
 | `01_batch_etl.ipynb` | Ingest raw TLC parquet → clean (11.3% invalid rows filtered) → add derived columns (trip duration, speed, time-of-day) → write partitioned parquet |
 | `02_kafka_producer.ipynb` | Read processed parquet → publish records to Kafka topic `tlc-trips` at 50ms intervals |
-| `03_spark_streaming.ipynb` | Subscribe to `tlc-trips` → parse JSON → 30-second tumbling window aggregations → console sink |
+| `03_spark_streaming.ipynb` | Subscribe to `tlc-trips` → parse JSON → 5-minute event-time tumbling window aggregations by pickup zone → update mode with checkpoint → console sink |
 
 ## Setup
 
