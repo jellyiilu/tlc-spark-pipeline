@@ -30,7 +30,7 @@ Kafka broker (tlc-trips)    3-partition topic on localhost:9092
 | Notebook | Description |
 |---|---|
 | `01_batch_etl.ipynb` | Ingest raw TLC parquet → clean (11.3% invalid rows filtered) → add derived columns (trip duration, speed, time-of-day) → write partitioned parquet |
-| `02_kafka_producer.ipynb` | Read processed parquet → publish records to Kafka topic `tlc-trips` at 50ms intervals |
+| `02_kafka_producer.ipynb` | Read processed parquet → publish 5,000 records to Kafka topic `tlc-trips` at 20ms intervals, keyed by pickup zone |
 | `03_spark_streaming.ipynb` | Subscribe to `tlc-trips` → parse JSON → 5-minute event-time tumbling window aggregations by pickup zone → update mode with checkpoint → console sink |
 
 ## Setup
@@ -78,7 +78,7 @@ curl -O https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-03.
 ### Run
 1. Open `notebooks/01_batch_etl.ipynb` → run all cells (kernel: tlc-spark)
 2. Open `notebooks/02_kafka_producer.ipynb` → run all cells
-3. Open `notebooks/03_spark_streaming.ipynb` → run cells 1–4, then cell 5; switch to notebook 02 and re-run the producer cell to see live results
+3. Open `notebooks/03_spark_streaming.ipynb` → run all cells (reads from `startingOffsets=earliest`, no need to run producer simultaneously)
 
 ## Data Quality
 
