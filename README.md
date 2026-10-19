@@ -1,68 +1,91 @@
 # TLC Trip Data Pipeline — PySpark + Kafka + Airflow
 
-A local batch and streaming data pipeline built on NYC TLC Yellow + Green Taxi trip records (Q1 2024, ~9.7M raw rows).
+A local batch and streaming data pipeline built on NYC TLC Q1 2024 trip records:
+Yellow taxi, Green taxi, and FHV rideshare (Uber/Lyft) — 3 sources, ~10.5M raw rows.
+Daily incremental ETL via `TARGET_DATE` env var; orchestrated by Airflow.
 
 ## Architecture
 
-```
-data/raw/yellow/*.parquet  data/raw/green/*.parquet
-         (NYC TLC source data — two taxi types)
-                    ↓
-01_ods_ingest.ipynb         ODS layer: ingest raw → add source_type + ingestion_ts metadata
-                    ↓
-data/warehouse/ods/         Partitioned by pickup_year / pickup_month
-                    ↓
-02_dwd_build.ipynb          DWD layer: unify schemas → clean → derive columns → star schema
-                    ↓
-data/warehouse/dwd/         fact_trips / dim_zone / dim_date
-                    ↓
-03_dws_build.ipynb          DWS layer: daily zone-level aggregation (salt-based skew handling)
-                    ↓
-data/warehouse/dws/         trips_daily (partitioned by year/month/day)
-                    ↓
-04_ads_metrics.ipynb        ADS layer: KPI metrics (trip count, GMV, surcharge rate, tip rate)
-                    ↓
-data/warehouse/ads/         kpi_daily
-                    ↓
-05_data_quality.ipynb       13 DQ rules → quarantine table (blocking on FAIL)
-                    ↓
-dags/tlc_pipeline.py        Airflow DAG orchestrating all 6 tasks with retry / backfill
-```
+### Batch pipeline (01 → 07)
 
 ```
-data/warehouse/dwd/fact_trips/
-         ↓
-02_kafka_producer.ipynb     Kafka producer: replay yellow records as real-time stream
-         ↓
-Kafka broker (tlc-trips)    3-partition topic on localhost:9092
-         ↓
-03_spark_streaming.ipynb    Spark Structured Streaming: 5-min event-time window aggregations
-                            by pickup zone → foreachBatch write to Parquet + console
-         ↓
-Reconciliation cell         Compare streaming trip_count vs offline DWD for same window
+data/raw/yellow/        data/raw/green/        data/raw/fhv_hv/
+   (Yellow taxi)           (Green taxi)         (Uber / Lyft)
+                 \               |               /
+                  └──────────────┴──────────────┘
+                                 ↓
+01_ods_ingest.ipynb      ODS: filter to TARGET_DATE → rename datetime fields
+                              → add source_type / ingestion_ts / partition cols
+                                 ↓
+data/warehouse/ods/      Partitioned by pickup_year / pickup_month / pickup_day
+                                 ↓
+02_dq_after_ods.ipynb    DQ Gate 1: partition non-empty per source;
+                              daily count vs 7-day avg ≤30% — FAIL blocks DWD
+                                 ↓
+03_dwd_build.ipynb       DWD: unify FHV HV field names → clean → derive cols
+                              → star schema (fact_trips + dim_zone + dim_date)
+                              dynamic partition overwrite
+                                 ↓
+data/warehouse/dwd/      fact_trips / dim_zone / dim_date
+                                 ↓
+04_dq_after_dwd.ipynb    DQ Gate 2: 16 rules — completeness / range / temporal
+                              / row conservation / referential integrity
+                              FHV HV parity: trip_time, trip_miles, driver_pay,
+                              request_datetime order; passenger_count null → tag
+                              only (not quarantined); violations → quarantine table
+                              FAIL blocks DWS
+                                 ↓
+05_dws_build.ipynb       DWS: daily zone-level aggregation
+                              salt-based two-phase aggregation for hotspot skew
+                                 ↓
+data/warehouse/dws/      trips_daily (partitioned by year/month/day)
+                                 ↓
+06_dq_after_dws.ipynb    DQ Gate 3: DWS trip_count ≈ fact_trips ±0.1% — FAIL blocks ADS
+                                 ↓
+07_ads_metrics.ipynb     ADS: KPI (trip_count, GMV, surcharge_rate, tip_rate,
+                              avg_fare, avg_distance, avg_duration)
+                                 ↓
+data/warehouse/ads/      kpi_daily
+```
+
+### Streaming pipeline (08 → 09)
+
+```
+data/warehouse/ods/yellow/   (ODS — uncleaned; producer reads ODS so streaming
+                              consumer applies its own cleaning, making offline
+                              vs streaming reconciliation meaningful)
+                                 ↓
+08_kafka_producer.ipynb      Replay ODS records → Kafka at 20ms intervals,
+                              keyed by PULocationID
+                                 ↓
+Kafka topic: tlc-trips       3 partitions · localhost:9092 · KRaft mode
+                                 ↓
+09_spark_streaming.ipynb     5-min event-time tumbling window by PULocationID
+                              → foreachBatch: write Parquet + reconcile
+                                trip_count vs offline DWD for same window
 ```
 
 ## Tech Stack
 
-- **PySpark 3.5.1** — batch ETL (ODS/DWD/DWS/ADS) and structured streaming
-- **Kafka 3.7.1** — message broker (KRaft mode, no Zookeeper)
-- **Airflow 2.9.3** — DAG orchestration, retry, backfill
+- **PySpark 3.5.1** — batch ETL (ODS/DWD/DWS/ADS) and Structured Streaming
+- **Kafka 3.7.1** — message broker (KRaft mode, no ZooKeeper)
+- **Airflow 2.9.3** — DAG orchestration, retry, backfill (`{{ ds }}` → TARGET_DATE)
 - **kafka-python** — producer client
-- **pandas + pyarrow** — parquet I/O for producer
+- **pandas + pyarrow** — parquet I/O for Kafka producer
 
 ## Notebooks
 
-| Notebook | Layer | Description |
-|---|---|---|
-| `01_ods_ingest.ipynb` | ODS | Ingest Yellow + Green + FHV HV raw parquet → add source_type / ingestion_ts / partition columns → write partitioned ODS |
-| `02_dq_after_ods.ipynb` | DQ Gate 1 | Row count non-empty per source; daily count vs 7-day avg ≤30% — FAIL blocks DWD |
-| `03_dwd_build.ipynb` | DWD | Unify schemas (rename FHV HV fields, add null passenger_count) → clean → derive columns → write fact_trips + dim_zone + dim_date; dynamic partition overwrite |
-| `04_dq_after_dwd.ipynb` | DQ Gate 2 | Rules 1–12: completeness / range / temporal / row conservation / referential integrity; violations to quarantine table — FAIL blocks DWS |
-| `05_dws_build.ipynb` | DWS | Daily zone-level aggregation; salt-based two-phase aggregation for hotspot skew |
-| `06_dq_after_dws.ipynb` | DQ Gate 3 | DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
-| `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, surcharge_rate, tip_rate, avg_fare, avg_distance, avg_duration |
-| `08_kafka_producer.ipynb` | Stream | Replay yellow fact_trips records to Kafka at 20ms intervals, keyed by pickup zone |
-| `09_spark_streaming.ipynb` | Stream | Subscribe to tlc-trips → 5-min event-time tumbling window by PULocationID → foreachBatch write Parquet + reconcile vs offline DWD |
+| # | Notebook | Layer | Description |
+|---|---|---|---|
+| 01 | `01_ods_ingest.ipynb` | ODS | Ingest Yellow + Green + FHV HV raw parquet → rename datetime fields → add source_type / ingestion_ts / partition cols → write partitioned ODS |
+| 02 | `02_dq_after_ods.ipynb` | DQ Gate 1 | Partition non-empty per source; daily count vs 7-day rolling avg ≤30% — FAIL blocks DWD |
+| 03 | `03_dwd_build.ipynb` | DWD | Unify FHV HV field names → clean → derive columns → write fact_trips + dim_zone + dim_date; dynamic partition overwrite |
+| 04 | `04_dq_after_dwd.ipynb` | DQ Gate 2 | 16 rules: Rules 1–10 Yellow/Green (completeness/range/temporal), Rules 11–12 DWD (row conservation/referential), Rules 13–16 FHV HV parity (trip_time/miles/driver_pay/request order); passenger_count null tagged not quarantined — FAIL blocks DWS |
+| 05 | `05_dws_build.ipynb` | DWS | Daily zone-level aggregation; salt-based two-phase aggregation for hotspot skew |
+| 06 | `06_dq_after_dws.ipynb` | DQ Gate 3 | DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
+| 07 | `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, surcharge_rate, tip_rate, avg_fare, avg_distance, avg_duration |
+| 08 | `08_kafka_producer.ipynb` | Stream | Replay ODS yellow records to Kafka at 20ms intervals, keyed by PULocationID |
+| 09 | `09_spark_streaming.ipynb` | Stream | Subscribe to tlc-trips → 5-min event-time tumbling window by PULocationID → foreachBatch write Parquet + reconcile vs offline DWD |
 
 ## Airflow DAG
 
@@ -74,34 +97,27 @@ start → ods_ingest_yellow ─┐
       → ods_ingest_fhv    ─┘
 ```
 
+`{{ ds }}` (logical execution date = previous day) is passed as `TARGET_DATE` to each notebook via `env` in the BashOperator.
+
 ## Setup
 
 ### Prerequisites
 - Python 3.10 (conda env)
 - Java 11+
-- Kafka 3.7.1 (download from kafka.apache.org, extract to ~/kafka/)
+- Kafka 3.7.1 (download from kafka.apache.org, extract to `~/kafka/`)
 
 ### Install dependencies
 ```bash
 conda create -n tlc-spark python=3.10 -y
 conda activate tlc-spark
-pip install pyspark==3.5.1 kafka-python pandas pyarrow jupyter ipykernel \
-  apache-airflow==2.9.3 \
+pip install -r requirements.txt \
   --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.9.3/constraints-3.10.txt"
 python -m ipykernel install --user --name tlc-spark --display-name "tlc-spark"
 ```
 
 ### Download TLC data
 ```bash
-mkdir -p data/raw/yellow data/raw/green
-# Yellow
-curl -o data/raw/yellow/yellow_tripdata_2024-01.parquet https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet
-curl -o data/raw/yellow/yellow_tripdata_2024-02.parquet https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-02.parquet
-curl -o data/raw/yellow/yellow_tripdata_2024-03.parquet https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-03.parquet
-# Green
-curl -o data/raw/green/green_tripdata_2024-01.parquet https://d37ci6vzurychx.cloudfront.net/trip-data/green_tripdata_2024-01.parquet
-curl -o data/raw/green/green_tripdata_2024-02.parquet https://d37ci6vzurychx.cloudfront.net/trip-data/green_tripdata_2024-02.parquet
-curl -o data/raw/green/green_tripdata_2024-03.parquet https://d37ci6vzurychx.cloudfront.net/trip-data/green_tripdata_2024-03.parquet
+bash scripts/download_data.sh   # downloads Q1 2024 Yellow + Green + FHV HV (~1.5 GB)
 ```
 
 ### Start Kafka
@@ -116,47 +132,67 @@ curl -o data/raw/green/green_tripdata_2024-03.parquet https://d37ci6vzurychx.clo
 
 ### Run batch pipeline
 ```bash
-# Run notebooks 01-05 in order (kernel: tlc-spark)
-jupyter nbconvert --to notebook --execute --inplace \
-  --ExecutePreprocessor.kernel_name=tlc-spark \
-  notebooks/01_ods_ingest.ipynb notebooks/02_dwd_build.ipynb \
-  notebooks/03_dws_build.ipynb  notebooks/04_ads_metrics.ipynb \
-  notebooks/05_data_quality.ipynb
+export TARGET_DATE=2024-03-15
+for nb in 01_ods_ingest 02_dq_after_ods 03_dwd_build 04_dq_after_dwd \
+           05_dws_build 06_dq_after_dws 07_ads_metrics; do
+  jupyter nbconvert --to notebook --execute --inplace \
+    --ExecutePreprocessor.kernel_name=tlc-spark \
+    --ExecutePreprocessor.timeout=600 \
+    notebooks/${nb}.ipynb
+done
 ```
 
 ### Run streaming
 ```bash
-# 1. Run Kafka producer
+# 1. Start Kafka producer (replays ODS data)
 jupyter nbconvert --to notebook --execute --inplace \
-  --ExecutePreprocessor.kernel_name=tlc-spark notebooks/02_kafka_producer.ipynb
-# 2. Run streaming (reads from startingOffsets=earliest)
+  --ExecutePreprocessor.kernel_name=tlc-spark notebooks/08_kafka_producer.ipynb
+
+# 2. Start Spark Structured Streaming consumer
 jupyter nbconvert --to notebook --execute --inplace \
-  --ExecutePreprocessor.kernel_name=tlc-spark notebooks/03_spark_streaming.ipynb
+  --ExecutePreprocessor.kernel_name=tlc-spark notebooks/09_spark_streaming.ipynb
 ```
 
-## Data Quality Results (Q1 2024)
+## Data Quality Results (2024-03-15)
 
-| Rule | Layer | Type | Result |
+### Gate 2 — 16 rules across Yellow/Green and FHV HV
+
+| Rule | Source | Layer | Result |
 |---|---|---|---|
-| fare_amount not null | ODS | completeness | ✅ PASS |
-| pickup_datetime not null | ODS | completeness | ✅ PASS |
-| PULocationID not null | ODS | completeness | ✅ PASS |
-| DOLocationID not null | ODS | completeness | ✅ PASS |
-| passenger_count not null | ODS | completeness | ❌ FAIL — 760,402 nulls (7.8%) |
-| fare_amount > 0 | ODS | range | ✅ PASS |
-| trip_distance >= 0 | ODS | range | ✅ PASS |
-| passenger_count in [1,6] | ODS | range | ✅ PASS |
-| dropoff > pickup | ODS | temporal | ✅ PASS |
-| pickup in 2024-Q1 | ODS | temporal | ✅ PASS |
-| fact >= ODS × 0.80 | DWD | row conservation | ✅ PASS |
-| PULocationID in dim_zone | DWD | referential | ✅ PASS |
-| DWS trips ≈ fact rows | DWS | agg conservation | ✅ PASS |
+| fare_amount not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
+| pickup_datetime not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
+| PULocationID not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
+| DOLocationID not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
+| passenger_count null rate < 15% (**tag-only**) | Yellow+Green | ODS | ✅ PASS — 15,302 tagged |
+| fare_amount > 0 | Yellow+Green | ODS | ✅ PASS — bad=2,246 (<5%) |
+| trip_distance >= 0 | Yellow+Green | ODS | ✅ PASS — bad=0 |
+| passenger_count in [1,6] | Yellow+Green | ODS | ✅ PASS — bad=1,515 (<15%) |
+| dropoff > pickup | Yellow+Green | ODS | ✅ PASS — bad=39 (<1%) |
+| pickup in 2024-Q1 | Yellow+Green | ODS | ✅ PASS — bad=0 |
+| trip_time > 0 | FHV HV | ODS | ✅ PASS — bad=0 |
+| trip_miles > 0 | FHV HV | ODS | ✅ PASS — bad=100 (<1%) |
+| driver_pay >= 0 | FHV HV | ODS | ✅ PASS — bad=6 (<1%) |
+| request_datetime ≤ pickup_datetime | FHV HV | ODS | ✅ PASS — bad=7,085 (<1%) |
+| fact_trips >= ODS_all × 0.80 | All | DWD | ✅ PASS |
+| PULocationID in dim_zone | All | DWD | ✅ PASS |
 
-**Quarantine rate: 10.17%** (988,678 / 9,722,363 rows isolated)
+**Quarantine rate: 1.27% overall** (Yellow/Green 2.90%, FHV HV 0.98%)
 
-## Key Metrics (Q1 2024)
+Notable findings:
+- `passenger_count` null (11.7% of taxi records) is a known TLC upstream issue; records retain valid fare/time/location → tagged with `passenger_count_missing=true`, not quarantined
+- FHV HV `request_after_pickup` (7,085 records): dispatch platform clock sync drift — only detectable after adding FHV HV-specific temporal rules
+
+### Gate 3 — DWS conservation
+
+| Rule | Result |
+|---|---|
+| DWS trip_count == fact_trips | ✅ PASS — drift 0.0000% |
+
+## Key Metrics (2024-03-15, single-day run)
 
 | Source | Trips | GMV | Surcharge Rate | Avg Fare |
 |---|---|---|---|---|
-| Yellow | 8,447,443 | ~$234M | ~21% | ~$18.6 |
-| Green | 146,590 | ~$3.2M | ~15% | ~$16.3 |
+| Yellow | 121,063 | $3.40M | 19.4% | $19.17 |
+| Green | 1,868 | $43K | 13.5% | $17.11 |
+| FHV HV | 739,978 | $22.1M | 4.7% | $26.33 |
+| **Total** | **862,909** | **$25.5M** | — | — |
