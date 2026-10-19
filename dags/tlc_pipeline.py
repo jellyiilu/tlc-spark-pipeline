@@ -3,8 +3,10 @@ TLC 出行数据管道 Airflow DAG
 
 任务依赖：
   ods_yellow ─┐
-              ├─ dwd_build ─ dws_build ─ ads_metrics ─ data_quality
-  ods_green  ─┘
+  ods_green  ─┼─ dwd_build ─ dq_after_dwd ─ dws_build ─ dq_after_dws ─ ads_metrics
+  ods_fhv    ─┘
+
+DQ 检查作为门控节点：FAIL 则抛出异常，下游任务不执行，脏数据不会污染后续层。
 
 执行方式：每日增量（schedule_interval='0 6 * * *'，每天 06:00 跑前一天数据）
 """
@@ -43,7 +45,7 @@ with DAG(
 
     start = EmptyOperator(task_id="start")
 
-    # ODS 层：黄色 + 绿色并行入仓
+    # ODS 层：三路数据源并行入仓
     ods_yellow = BashOperator(
         task_id="ods_ingest_yellow",
         bash_command=(
@@ -62,11 +64,29 @@ with DAG(
         ),
     )
 
-    # DWD 层：两路 ODS 合并后统一清洗
+    ods_fhv = BashOperator(
+        task_id="ods_ingest_fhv",
+        bash_command=(
+            f"{NBCONVERT} {NOTEBOOKS}/01_ods_ingest.ipynb "
+            "--ExecutePreprocessor.kernel_name=tlc-spark "
+            f"&& echo 'ODS fhv done: {{{{ ds }}}}'"
+        ),
+    )
+
+    # DWD 层：三路 ODS 合并后统一清洗
     dwd_build = BashOperator(
         task_id="dwd_build",
         bash_command=(
             f"{NBCONVERT} {NOTEBOOKS}/02_dwd_build.ipynb "
+            "--ExecutePreprocessor.kernel_name=tlc-spark"
+        ),
+    )
+
+    # DQ 门控 — DWD 之后（Rules 1-12，FAIL 阻断 DWS）
+    dq_after_dwd = BashOperator(
+        task_id="dq_after_dwd",
+        bash_command=(
+            f"{NBCONVERT} {NOTEBOOKS}/05a_dq_after_dwd.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
     )
@@ -80,6 +100,15 @@ with DAG(
         ),
     )
 
+    # DQ 门控 — DWS 之后（Rule 13，FAIL 阻断 ADS）
+    dq_after_dws = BashOperator(
+        task_id="dq_after_dws",
+        bash_command=(
+            f"{NBCONVERT} {NOTEBOOKS}/05b_dq_after_dws.ipynb "
+            "--ExecutePreprocessor.kernel_name=tlc-spark"
+        ),
+    )
+
     # ADS 层：KPI 指标
     ads_metrics = BashOperator(
         task_id="ads_metrics",
@@ -89,16 +118,7 @@ with DAG(
         ),
     )
 
-    # 数据质量检查：作为调度节点，FAIL 则阻断后续（通过 task 失败实现）
-    data_quality = BashOperator(
-        task_id="data_quality_check",
-        bash_command=(
-            f"{NBCONVERT} {NOTEBOOKS}/05_data_quality.ipynb "
-            "--ExecutePreprocessor.kernel_name=tlc-spark"
-        ),
-    )
-
     end = EmptyOperator(task_id="end")
 
-    # 依赖关系
-    start >> [ods_yellow, ods_green] >> dwd_build >> dws_build >> ads_metrics >> data_quality >> end
+    # 依赖关系：DQ 作为门控节点，每层之后立即检查
+    start >> [ods_yellow, ods_green, ods_fhv] >> dwd_build >> dq_after_dwd >> dws_build >> dq_after_dws >> ads_metrics >> end
