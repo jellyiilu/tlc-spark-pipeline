@@ -11,8 +11,9 @@ DQ 检查作为门控节点：FAIL 则抛出异常，下游任务不执行，脏
   dq_after_dwd : 完整性/范围/时序/行数守恒/参照完整性（Rules 1-12）
   dq_after_dws : 聚合守恒（Rule 13）
 
-增量策略：Airflow 通过环境变量 TARGET_MONTH={{ ds[:7] }} 传入目标月份，
-每次只处理该月数据，动态分区覆盖只覆盖对应月分区，不影响历史数据。
+增量策略：Airflow 通过环境变量 TARGET_DATE={{ ds }} 传入目标日期。
+{{ ds }} 在 Airflow 2 中表示本次运行负责的逻辑日期（即前一天），
+每次只处理该日期数据，动态分区覆盖只覆盖对应日分区，不影响历史数据。
 """
 import os
 from datetime import datetime, timedelta
@@ -47,12 +48,12 @@ with DAG(
     tags=["tlc", "pyspark", "kafka"],
 ) as dag:
 
-    # TARGET_MONTH 从执行日期推导（每月1日触发时处理上个月）
-    TARGET_MONTH_ENV = {"TARGET_MONTH": "{{ ds[:7] }}"}
+    # {{ ds }} 在 Airflow 2 中即为本次运行的逻辑日期（前一天）
+    TARGET_DATE_ENV = {"TARGET_DATE": "{{ ds }}"}
 
     start = EmptyOperator(task_id="start")
 
-    # ODS 层：三路数据源并行入仓，只处理 TARGET_MONTH 对应文件
+    # ODS 层：三路数据源并行入仓，只处理 TARGET_DATE 对应文件
     ods_yellow = BashOperator(
         task_id="ods_ingest_yellow",
         bash_command=(
@@ -60,7 +61,7 @@ with DAG(
             "--ExecutePreprocessor.kernel_name=tlc-spark "
             f"&& echo 'ODS yellow done: {{{{ ds }}}}'"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
     ods_green = BashOperator(
@@ -70,7 +71,7 @@ with DAG(
             "--ExecutePreprocessor.kernel_name=tlc-spark "
             f"&& echo 'ODS green done: {{{{ ds }}}}'"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
     ods_fhv = BashOperator(
@@ -80,7 +81,7 @@ with DAG(
             "--ExecutePreprocessor.kernel_name=tlc-spark "
             f"&& echo 'ODS fhv done: {{{{ ds }}}}'"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
     # DQ 门控 — ODS 之后（行数非空 + 月度波动，FAIL 阻断 DWD）
@@ -90,17 +91,17 @@ with DAG(
             f"{NBCONVERT} {NOTEBOOKS}/05c_dq_after_ods.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
-    # DWD 层：三路 ODS 合并后统一清洗，只处理 TARGET_MONTH 分区
+    # DWD 层：三路 ODS 合并后统一清洗，只处理 TARGET_DATE 分区
     dwd_build = BashOperator(
         task_id="dwd_build",
         bash_command=(
             f"{NBCONVERT} {NOTEBOOKS}/02_dwd_build.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
     # DQ 门控 — DWD 之后（Rules 1-12，FAIL 阻断 DWS）
@@ -110,17 +111,17 @@ with DAG(
             f"{NBCONVERT} {NOTEBOOKS}/05a_dq_after_dwd.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
-    # DWS 层：日粒度聚合（含加盐去倾斜），只处理 TARGET_MONTH
+    # DWS 层：日粒度聚合（含加盐去倾斜），只处理 TARGET_DATE
     dws_build = BashOperator(
         task_id="dws_build",
         bash_command=(
             f"{NBCONVERT} {NOTEBOOKS}/03_dws_build.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
     # DQ 门控 — DWS 之后（Rule 13，FAIL 阻断 ADS）
@@ -130,17 +131,17 @@ with DAG(
             f"{NBCONVERT} {NOTEBOOKS}/05b_dq_after_dws.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
-    # ADS 层：KPI 指标，只处理 TARGET_MONTH
+    # ADS 层：KPI 指标，只处理 TARGET_DATE
     ads_metrics = BashOperator(
         task_id="ads_metrics",
         bash_command=(
             f"{NBCONVERT} {NOTEBOOKS}/04_ads_metrics.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
-        env=TARGET_MONTH_ENV,
+        env=TARGET_DATE_ENV,
     )
 
     end = EmptyOperator(task_id="end")
