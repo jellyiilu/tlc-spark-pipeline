@@ -54,21 +54,24 @@ Reconciliation cell         Compare streaming trip_count vs offline DWD for same
 
 | Notebook | Layer | Description |
 |---|---|---|
-| `01_ods_ingest.ipynb` | ODS | Ingest Yellow + Green raw parquet → add source_type / ingestion_ts metadata → write partitioned ODS |
-| `02_dwd_build.ipynb` | DWD | Unify schemas (tpep/lpep rename, Airport_fee/trip_type alignment) → clean → derive columns → write fact_trips + dim_zone + dim_date; dynamic partition overwrite for idempotent reruns |
-| `03_dws_build.ipynb` | DWS | Daily zone-level aggregation; salt-based two-phase aggregation for hotspot zones (e.g. zone 161); sliding-window recompute for cross-day late data |
-| `04_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, surcharge_rate (~21% yellow / ~15% green), tip_rate, avg_fare |
-| `05_data_quality.ipynb` | DQ | 13 rules across ODS/DWD/DWS (completeness, range, temporal, row conservation, referential integrity); violations written to quarantine table with reason tag; daily isolation rate ~10% |
-| `02_kafka_producer.ipynb` | Stream | Read processed yellow parquet → publish 5,000 records at 20ms intervals keyed by pickup zone |
-| `03_spark_streaming.ipynb` | Stream | Subscribe to tlc-trips → parse JSON → 5-min event-time tumbling window by PULocationID → foreachBatch write Parquet + reconcile vs offline DWD |
+| `01_ods_ingest.ipynb` | ODS | Ingest Yellow + Green + FHV HV raw parquet → add source_type / ingestion_ts / partition columns → write partitioned ODS |
+| `02_dq_after_ods.ipynb` | DQ Gate 1 | Row count non-empty per source; daily count vs 7-day avg ≤30% — FAIL blocks DWD |
+| `03_dwd_build.ipynb` | DWD | Unify schemas (rename FHV HV fields, add null passenger_count) → clean → derive columns → write fact_trips + dim_zone + dim_date; dynamic partition overwrite |
+| `04_dq_after_dwd.ipynb` | DQ Gate 2 | Rules 1–12: completeness / range / temporal / row conservation / referential integrity; violations to quarantine table — FAIL blocks DWS |
+| `05_dws_build.ipynb` | DWS | Daily zone-level aggregation; salt-based two-phase aggregation for hotspot skew |
+| `06_dq_after_dws.ipynb` | DQ Gate 3 | DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
+| `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, surcharge_rate, tip_rate, avg_fare, avg_distance, avg_duration |
+| `08_kafka_producer.ipynb` | Stream | Replay yellow fact_trips records to Kafka at 20ms intervals, keyed by pickup zone |
+| `09_spark_streaming.ipynb` | Stream | Subscribe to tlc-trips → 5-min event-time tumbling window by PULocationID → foreachBatch write Parquet + reconcile vs offline DWD |
 
 ## Airflow DAG
 
-`dags/tlc_pipeline.py` — 6 tasks, daily schedule (`0 6 * * *`), retry=2:
+`dags/tlc_pipeline.py` — 9 tasks, daily schedule (`0 6 * * *`), retry=2:
 
 ```
 start → ods_ingest_yellow ─┐
-      → ods_ingest_green  ─┴→ dwd_build → dws_build → ads_metrics → data_quality_check → end
+      → ods_ingest_green  ─┼─ dq_after_ods → dwd_build → dq_after_dwd → dws_build → dq_after_dws → ads_metrics → end
+      → ods_ingest_fhv    ─┘
 ```
 
 ## Setup

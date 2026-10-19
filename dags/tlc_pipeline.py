@@ -88,7 +88,7 @@ with DAG(
     dq_after_ods = BashOperator(
         task_id="dq_after_ods",
         bash_command=(
-            f"{NBCONVERT} {NOTEBOOKS}/05c_dq_after_ods.ipynb "
+            f"{NBCONVERT} {NOTEBOOKS}/02_dq_after_ods.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
         env=TARGET_DATE_ENV,
@@ -98,7 +98,7 @@ with DAG(
     dwd_build = BashOperator(
         task_id="dwd_build",
         bash_command=(
-            f"{NBCONVERT} {NOTEBOOKS}/02_dwd_build.ipynb "
+            f"{NBCONVERT} {NOTEBOOKS}/03_dwd_build.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
         env=TARGET_DATE_ENV,
@@ -108,7 +108,7 @@ with DAG(
     dq_after_dwd = BashOperator(
         task_id="dq_after_dwd",
         bash_command=(
-            f"{NBCONVERT} {NOTEBOOKS}/05a_dq_after_dwd.ipynb "
+            f"{NBCONVERT} {NOTEBOOKS}/04_dq_after_dwd.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
         env=TARGET_DATE_ENV,
@@ -118,7 +118,7 @@ with DAG(
     dws_build = BashOperator(
         task_id="dws_build",
         bash_command=(
-            f"{NBCONVERT} {NOTEBOOKS}/03_dws_build.ipynb "
+            f"{NBCONVERT} {NOTEBOOKS}/05_dws_build.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
         env=TARGET_DATE_ENV,
@@ -128,7 +128,7 @@ with DAG(
     dq_after_dws = BashOperator(
         task_id="dq_after_dws",
         bash_command=(
-            f"{NBCONVERT} {NOTEBOOKS}/05b_dq_after_dws.ipynb "
+            f"{NBCONVERT} {NOTEBOOKS}/06_dq_after_dws.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
         env=TARGET_DATE_ENV,
@@ -138,7 +138,7 @@ with DAG(
     ads_metrics = BashOperator(
         task_id="ads_metrics",
         bash_command=(
-            f"{NBCONVERT} {NOTEBOOKS}/04_ads_metrics.ipynb "
+            f"{NBCONVERT} {NOTEBOOKS}/07_ads_metrics.ipynb "
             "--ExecutePreprocessor.kernel_name=tlc-spark"
         ),
         env=TARGET_DATE_ENV,
