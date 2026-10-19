@@ -3,10 +3,13 @@ TLC 出行数据管道 Airflow DAG
 
 任务依赖：
   ods_yellow ─┐
-  ods_green  ─┼─ dwd_build ─ dq_after_dwd ─ dws_build ─ dq_after_dws ─ ads_metrics
+  ods_green  ─┼─ dq_after_ods ─ dwd_build ─ dq_after_dwd ─ dws_build ─ dq_after_dws ─ ads_metrics
   ods_fhv    ─┘
 
 DQ 检查作为门控节点：FAIL 则抛出异常，下游任务不执行，脏数据不会污染后续层。
+  dq_after_ods : 行数非空 + 月度波动检测，防止空分区流入 DWD
+  dq_after_dwd : 完整性/范围/时序/行数守恒/参照完整性（Rules 1-12）
+  dq_after_dws : 聚合守恒（Rule 13）
 
 执行方式：每日增量（schedule_interval='0 6 * * *'，每天 06:00 跑前一天数据）
 """
@@ -82,6 +85,15 @@ with DAG(
         ),
     )
 
+    # DQ 门控 — ODS 之后（行数非空 + 月度波动，FAIL 阻断 DWD）
+    dq_after_ods = BashOperator(
+        task_id="dq_after_ods",
+        bash_command=(
+            f"{NBCONVERT} {NOTEBOOKS}/05c_dq_after_ods.ipynb "
+            "--ExecutePreprocessor.kernel_name=tlc-spark"
+        ),
+    )
+
     # DQ 门控 — DWD 之后（Rules 1-12，FAIL 阻断 DWS）
     dq_after_dwd = BashOperator(
         task_id="dq_after_dwd",
@@ -121,4 +133,4 @@ with DAG(
     end = EmptyOperator(task_id="end")
 
     # 依赖关系：DQ 作为门控节点，每层之后立即检查
-    start >> [ods_yellow, ods_green, ods_fhv] >> dwd_build >> dq_after_dwd >> dws_build >> dq_after_dws >> ads_metrics >> end
+    start >> [ods_yellow, ods_green, ods_fhv] >> dq_after_ods >> dwd_build >> dq_after_dwd >> dws_build >> dq_after_dws >> ads_metrics >> end
