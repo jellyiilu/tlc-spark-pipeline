@@ -146,13 +146,18 @@ done
 
 ### Run streaming
 ```bash
-# 1. Start Kafka producer (replays ODS data)
+# 1. Reset: recreate Kafka topic and clear output/checkpoint
+bash scripts/reset_stream.sh
+
+# 2. Terminal A: start consumer (waits for data, auto-stops 30s after last record)
+jupyter nbconvert --to notebook --execute --inplace \
+  --ExecutePreprocessor.kernel_name=tlc-spark \
+  --ExecutePreprocessor.timeout=1200 \
+  notebooks/09_spark_streaming.ipynb
+
+# 3. Terminal B (~30s later, once consumer is ready): start producer
 jupyter nbconvert --to notebook --execute --inplace \
   --ExecutePreprocessor.kernel_name=tlc-spark notebooks/08_kafka_producer.ipynb
-
-# 2. Start Spark Structured Streaming consumer
-jupyter nbconvert --to notebook --execute --inplace \
-  --ExecutePreprocessor.kernel_name=tlc-spark notebooks/09_spark_streaming.ipynb
 ```
 
 ## Results (Q1 2024, 91-day backfill)
@@ -187,8 +192,23 @@ Top rejection reasons (yellow): zero distance 42.6%, non-positive fare (refunds/
 
 \* Taxi cash tips are not recorded. Platform take rate = 1 − driver_pay / base_passenger_fare.
 
+### Streaming vs offline reconciliation (Kafka + Spark 3.5.1)
+
+Replayed yellow-taxi ODS records for 2024-03-15 08:00–09:00 into Kafka (3 partitions, keyed by PULocationID); Structured Streaming applied the same cleaning rules as DWD and aggregated 5-min event-time windows × pickup zone.
+
+| Metric | Value |
+|---|---|
+| Records replayed | 5,246 (+1 watermark heartbeat) |
+| After cleaning (stream) | 4,920 |
+| Offline DWD, same window | 4,920 |
+| (window × zone) cells compared | 835 (12 windows) |
+| Mismatched / duplicate cells | 0 / 0 |
+
+- Cleaning is a verbatim copy of DWD's `when`-chain + `dq_reason IS NULL`; using `filter(fare > 0)` instead would diverge on NULLs (three-valued logic)
+- A heartbeat record (event time = END + 10 min) advances the watermark so the last window closes. It must **not** be filtered before aggregation: the optimizer pushes the filter below `EventTimeWatermark`, so the heartbeat never reaches the watermark. It is aggregated into virtual zone `-1` and excluded in `foreachBatch`
+- Run order: `bash scripts/reset_stream.sh` → start 09 → run 08
+
 ### Known limitations
 - `passenger_count = 0` (yellow ~102K rows) is rejected while NULL is only tagged — inconsistent, kept as a conservative choice
 - DWD selects the intersection of columns across sources, dropping `hvfhs_license_num` (Uber vs Lyft) and taxi `extra`
 - Airflow backfill on macOS: task processes occasionally hung at fork (6 times in 91 days); a local watchdog script detected and restarted stuck runs
-- Streaming pipeline (08/09) not yet re-validated against the final batch output
