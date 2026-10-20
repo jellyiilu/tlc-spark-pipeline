@@ -80,16 +80,16 @@ Kafka topic: tlc-trips       3 partitions · localhost:9092 · KRaft mode
 | 01 | `01_ods_ingest.ipynb` | ODS | Ingest Yellow + Green + FHV HV raw parquet → rename datetime fields → add source_type / ingestion_ts / partition cols → write partitioned ODS |
 | 02 | `02_dq_after_ods.ipynb` | DQ Gate 1 | Partition non-empty per source; daily count vs 7-day rolling avg ≤30% — FAIL blocks DWD |
 | 03 | `03_dwd_build.ipynb` | DWD | Unify FHV HV field names → clean → derive columns → write fact_trips + dim_zone + dim_date; dynamic partition overwrite |
-| 04 | `04_dq_after_dwd.ipynb` | DQ Gate 2 | 16 rules: Rules 1–10 Yellow/Green (completeness/range/temporal), Rules 11–12 DWD (row conservation/referential), Rules 13–16 FHV HV parity (trip_time/miles/driver_pay/request order); passenger_count null tagged not quarantined — FAIL blocks DWS |
+| 04 | `04_dq_after_dwd.ipynb` | DQ Gate 2 | 16 rules: Rules 1–10 Yellow/Green (completeness/range/temporal), Rules 11–12 DWD (true row conservation via DWD_CLEANING / referential integrity), Rules 13–16 FHV HV parity (trip_time/miles/driver_pay/request_after_pickup); passenger_count null tagged not quarantined — FAIL blocks DWS |
 | 05 | `05_dws_build.ipynb` | DWS | Daily zone-level aggregation; salt-based two-phase aggregation for hotspot skew |
-| 06 | `06_dq_after_dws.ipynb` | DQ Gate 3 | DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
-| 07 | `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, surcharge_rate, tip_rate, avg_fare, avg_distance, avg_duration |
+| 06 | `06_dq_after_dws.ipynb` | DQ Gate 3 | Rule 17: DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
+| 07 | `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, govt_surcharge_rate (government fees / fare), fhv_platform_take_rate (1 - driver_pay / fare, FHV HV only), tip_rate, avg_fare, avg_distance, avg_duration; dynamic partition overwrite |
 | 08 | `08_kafka_producer.ipynb` | Stream | Replay ODS yellow records to Kafka at 20ms intervals, keyed by PULocationID |
 | 09 | `09_spark_streaming.ipynb` | Stream | Subscribe to tlc-trips → 5-min event-time tumbling window by PULocationID → foreachBatch write Parquet + reconcile vs offline DWD |
 
 ## Airflow DAG
 
-`dags/tlc_pipeline.py` — 9 tasks, daily schedule (`0 6 * * *`), retry=2:
+`dags/tlc_pipeline.py` — 9 tasks, daily schedule (`0 6 * * *`), `catchup=True`, `end_date=2024-03-31`, retry=2:
 
 ```
 start → ods_ingest_yellow ─┐
@@ -97,9 +97,9 @@ start → ods_ingest_yellow ─┐
       → ods_ingest_fhv    ─┘
 ```
 
-`{{ ds }}` (logical execution date = previous day) is passed as `TARGET_DATE` to each notebook via `env` in the BashOperator.
+`{{ ds }}` (logical execution date) is passed as `TARGET_DATE` to each notebook via `env` in the BashOperator. With `catchup=True` and `end_date=2024-03-31`, registering the DAG triggers automatic backfill of all 91 Q1 2024 days. `max_active_runs=1` keeps runs serial so each day's ODS→DWD→ADS completes before the next starts.
 
-**Note on `catchup=False`**: The DAG uses `catchup=False`, so Airflow does **not** automatically run historical Q1 2024 backfill. When the DAG is registered today, `{{ ds }}` resolves to *yesterday* (i.e., 2026-10-18, not a 2024 date). To process Q1 2024 data, trigger each date manually in the Airflow UI or run the notebooks directly with `export TARGET_DATE=2024-01-01`.
+Each BashOperator uses `append_env=True` (so `PATH`/`JAVA_HOME` are preserved) and `--output /tmp/<task>_<ds>.ipynb` (so three parallel ODS tasks don't overwrite the same `.ipynb` file).
 
 ## Setup
 
@@ -188,13 +188,16 @@ Notable findings:
 
 | Rule | Result |
 |---|---|
-| DWS trip_count == fact_trips | ✅ PASS — drift 0.0000% |
+| Rule 17: DWS trip_count == fact_trips | ✅ PASS — drift 0.0000% |
 
 ## Key Metrics (2024-03-15, single-day run)
 
-| Source | Trips | GMV | Surcharge Rate | Avg Fare |
-|---|---|---|---|---|
-| Yellow | 121,063 | $3.40M | 19.4% | $19.17 |
-| Green | 1,868 | $43K | 13.5% | $17.11 |
-| FHV HV | 739,978 | $22.1M | 4.7% | $26.33 |
-| **Total** | **862,909** | **$25.5M** | — | — |
+Numbers reflect the unified dq_reason rules in `03_dwd_build` (including FHV `request_after_pickup`).
+Exact Q1-aggregate figures will update after full backfill (`catchup=True`, 91 daily runs).
+
+| Source | Trips (fact) | GMV | Govt Surcharge Rate | FHV Platform Take Rate | Avg Fare |
+|---|---|---|---|---|---|
+| Yellow | ~121K | ~$3.4M | ~19% | — | ~$19 |
+| Green | ~1.9K | ~$43K | ~13% | — | ~$17 |
+| FHV HV | ~740K | ~$22M | ~5% | ~28% (1 − driver_pay/fare) | ~$26 |
+| **Total** | **~863K** | **~$25.5M** | — | — | — |
