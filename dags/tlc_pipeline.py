@@ -7,7 +7,7 @@ TLC 出行数据管道 Airflow DAG
   ods_fhv    ─┘
 
 DQ 检查作为门控节点：FAIL 则抛出异常，下游任务不执行，脏数据不会污染后续层。
-  dq_after_ods : 行数非空 + 7 日滚动波动检测，防止空分区或异常增量流入 DWD
+  dq_after_ods : 行数非空（block）+ 同周同日波动检测（warn），防止空分区流入 DWD
   dq_after_dwd : 完整性/范围/时序/行数守恒/参照完整性（Rules 1-16）
   dq_after_dws : 聚合守恒（Rule 17）
 
@@ -29,7 +29,7 @@ BASE_DIR   = os.path.expanduser("~/tlc-spark-pipeline")
 NOTEBOOKS  = f"{BASE_DIR}/notebooks"
 CONDA_RUN  = "conda run -n tlc-spark"
 NBCONVERT  = (
-    f"{CONDA_RUN} jupyter nbconvert --to notebook --execute --inplace "
+    f"{CONDA_RUN} jupyter nbconvert --to notebook --execute "
     "--ExecutePreprocessor.timeout=600"
 )
 
@@ -47,7 +47,7 @@ with DAG(
     default_args=default_args,
     schedule_interval="0 6 * * *",
     catchup=True,                        # 注册后自动回填 start_date → end_date 全部 91 天
-    end_date=datetime(2024, 3, 31),      # Q1 最后一天；之后不再调度新运行
+    end_date=datetime(2024, 3, 31, 23, 59),  # 包含 3/31 06:00 那次运行（end_date 不含同秒，设 23:59 确保 Q1 最后一天被调度）
     max_active_runs=1,                   # 回填串行执行，防止并发写冲突
     tags=["tlc", "pyspark", "kafka"],
 ) as dag:
@@ -96,7 +96,7 @@ with DAG(
         append_env=True,
     )
 
-    # DQ 门控 — ODS 之后（行数非空 + 7 日滚动波动检测，FAIL 阻断 DWD）
+    # DQ 门控 — ODS 之后（行数非空 block + 同周同日波动 warn，FAIL 阻断 DWD）
     dq_after_ods = BashOperator(
         task_id="dq_after_ods",
         bash_command=(
@@ -106,6 +106,7 @@ with DAG(
         ),
         env=TARGET_DATE_ENV,
         append_env=True,
+        retries=0,
     )
 
     # DWD 层：三路 ODS 合并后统一清洗，只处理 TARGET_DATE 分区
@@ -120,7 +121,7 @@ with DAG(
         append_env=True,
     )
 
-    # DQ 门控 — DWD 之后（Rules 1-16，FAIL 阻断 DWS）
+    # DQ 门控 — DWD 之后（Rules 1-16，blocking FAIL 阻断 DWS）
     dq_after_dwd = BashOperator(
         task_id="dq_after_dwd",
         bash_command=(
@@ -130,6 +131,7 @@ with DAG(
         ),
         env=TARGET_DATE_ENV,
         append_env=True,
+        retries=0,
     )
 
     # DWS 层：日粒度聚合（含加盐两阶段），只处理 TARGET_DATE
@@ -154,6 +156,7 @@ with DAG(
         ),
         env=TARGET_DATE_ENV,
         append_env=True,
+        retries=0,
     )
 
     # ADS 层：KPI 指标（动态分区覆盖，幂等），只处理 TARGET_DATE
