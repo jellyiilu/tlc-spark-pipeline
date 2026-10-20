@@ -1,7 +1,7 @@
 # TLC Trip Data Pipeline — PySpark + Kafka + Airflow
 
 A local batch and streaming data pipeline built on NYC TLC Q1 2024 trip records:
-Yellow taxi, Green taxi, and FHV rideshare (Uber/Lyft) — 3 sources, Q1 2024 (Yellow ~10M + Green ~300K + FHV HV ~67M raw rows, ~78M total).
+Yellow taxi, Green taxi, and FHV rideshare (Uber/Lyft) — 3 sources, Q1 2024 (~70.0M raw rows: Yellow ~9.55M + Green ~0.17M + FHV HV ~60.30M).
 Daily incremental ETL via `TARGET_DATE` env var; orchestrated by Airflow.
 
 ## Architecture
@@ -155,49 +155,40 @@ jupyter nbconvert --to notebook --execute --inplace \
   --ExecutePreprocessor.kernel_name=tlc-spark notebooks/09_spark_streaming.ipynb
 ```
 
-## Data Quality Results (2024-03-15)
+## Results (Q1 2024, 91-day backfill)
 
-### Gate 2 — 16 rules across Yellow/Green and FHV HV
+### Layer reconciliation — 91 days × 3 sources, zero drift
 
-| Rule | Source | Layer | Result |
-|---|---|---|---|
-| fare_amount not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
-| pickup_datetime not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
-| PULocationID not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
-| DOLocationID not null | Yellow+Green | ODS | ✅ PASS — bad=0 |
-| passenger_count null rate < 15% (**tag-only**) | Yellow+Green | ODS | ✅ PASS — 15,302 tagged |
-| fare_amount > 0 | Yellow+Green | ODS | ✅ PASS — bad=2,246 (<5%) |
-| trip_distance >= 0 | Yellow+Green | ODS | ✅ PASS — bad=0 |
-| passenger_count in [1,6] | Yellow+Green | ODS | ✅ PASS — bad=1,515 (<15%) |
-| dropoff > pickup | Yellow+Green | ODS | ✅ PASS — bad=39 (<1%) |
-| pickup in 2024-Q1 | Yellow+Green | ODS | ✅ PASS — bad=0 |
-| trip_time > 0 | FHV HV | ODS | ✅ PASS — bad=0 |
-| trip_miles > 0 | FHV HV | ODS | ✅ PASS — bad=100 (<1%) |
-| driver_pay >= 0 | FHV HV | ODS | ✅ PASS — bad=6 (<1%) |
-| request_datetime ≤ pickup_datetime | FHV HV | ODS | ✅ PASS — bad=7,085 (<1%) |
-| fact + dwd_cleaning == ods_all (true conservation, no silent drops) | All | DWD | ✅ PASS |
-| PULocationID in dim_zone | All | DWD | ✅ PASS |
+`check_layers.py` verifies per (day × source): `ODS = fact + rejected`, `fact = DWS`, `DWS = ADS`.
 
-**Quarantine rate: 1.27% overall** (Yellow/Green 2.90%, FHV HV 0.98%)
+| Source | ODS | fact_trips | Rejected | Reject rate |
+|---|---|---|---|---|
+| FHV HV | 60,303,866 | 60,271,974 | 31,892 | 0.05% |
+| Yellow | 9,554,722 | 9,075,665 | 479,057 | 5.01% |
+| Green | 167,567 | 154,715 | 12,852 | 7.67% |
+| **Total** | **70,026,155** | **69,502,354** | **523,801** | **0.75%** |
 
-Notable findings:
-- `passenger_count` null (11.7% of taxi records) is a known TLC upstream issue; records retain valid fare/time/location → tagged with `passenger_count_missing=true`, not quarantined
-- FHV HV `request_after_pickup` (7,085 records): dispatch platform clock sync drift — only detectable after adding FHV HV-specific temporal rules
+Top rejection reasons (yellow): zero distance 42.6%, non-positive fare (refunds/voids) 29.1%, invalid passenger_count 21.4%.
 
-### Gate 3 — DWS conservation
+### Data quality — results persisted to `dq/dq_results` (one row per rule per day)
 
-| Rule | Result |
-|---|---|
-| Rule 17: DWS trip_count == fact_trips | ✅ PASS — drift 0.0000% |
+- 0 blocking failures across 91 days; 14 warnings
+- **Rule 16** (FHV request_datetime > pickup_datetime): 0.40%–1.54% daily — systematic upstream clock drift. The original 1% blocking threshold would have halted **54 / 91 days**; changed to tag-in-fact + warn at 3%
+- **Rule 5** (taxi passenger_count null rate): monthly avg 4.8% → 6.0% → **11.6%** (Jan→Mar), all 5 warnings in late March — a rising upstream trend, only visible because DQ results are persisted
+- **Rule 0b** (volume vs same weekday last week): warnings line up with holidays and the 2024-02-13 snowstorm; the anomaly "echoes" one week later (02-20) — next step: use a 4-week same-weekday median as baseline
 
-## Key Metrics (2024-03-15, single-day run)
+### Key metrics (ADS, weighted sum/sum)
 
-Numbers reflect the unified dq_reason rules in `03_dwd_build` (including FHV `request_after_pickup`).
-Exact Q1-aggregate figures will update after full backfill (`catchup=True`, 91 daily runs).
-
-| Source | Trips (fact) | GMV | Govt Surcharge Rate | FHV Platform Take Rate | Avg Fare |
+| Source | Trips | GMV | Avg fare | Tip rate | Platform take rate |
 |---|---|---|---|---|---|
-| Yellow | ~121K | ~$3.4M | ~19% | — | ~$19 |
-| Green | ~1.9K | ~$43K | ~13% | — | ~$17 |
-| FHV HV | ~740K | ~$22M | ~5% | ~28% (1 − driver_pay/fare) | ~$26 |
-| **Total** | **~863K** | **~$25.5M** | — | — | — |
+| FHV HV | 60.27M | $1,859M | $24.62 | 4.4% | 22.9% |
+| Yellow | 9.08M | $250M | $18.70 | 17.9%* | — |
+| Green | 0.15M | $3.5M | $16.76 | 14.3%* | — |
+
+\* Taxi cash tips are not recorded. Platform take rate = 1 − driver_pay / base_passenger_fare.
+
+### Known limitations
+- `passenger_count = 0` (yellow ~102K rows) is rejected while NULL is only tagged — inconsistent, kept as a conservative choice
+- DWD selects the intersection of columns across sources, dropping `hvfhs_license_num` (Uber vs Lyft) and taxi `extra`
+- Airflow backfill on macOS: task processes occasionally hung at fork (6 times in 91 days); a local watchdog script detected and restarted stuck runs
+- Streaming pipeline (08/09) not yet re-validated against the final batch output
