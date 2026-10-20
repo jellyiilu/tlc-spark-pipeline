@@ -61,7 +61,7 @@ with DAG(
             "--ExecutePreprocessor.kernel_name=tlc-spark "
             f"&& echo 'ODS yellow done: {{{{ ds }}}}'"
         ),
-        env=TARGET_DATE_ENV,
+        env={**TARGET_DATE_ENV, "SOURCE": "yellow"},
     )
 
     ods_green = BashOperator(
@@ -71,7 +71,7 @@ with DAG(
             "--ExecutePreprocessor.kernel_name=tlc-spark "
             f"&& echo 'ODS green done: {{{{ ds }}}}'"
         ),
-        env=TARGET_DATE_ENV,
+        env={**TARGET_DATE_ENV, "SOURCE": "green"},
     )
 
     ods_fhv = BashOperator(
@@ -81,7 +81,7 @@ with DAG(
             "--ExecutePreprocessor.kernel_name=tlc-spark "
             f"&& echo 'ODS fhv done: {{{{ ds }}}}'"
         ),
-        env=TARGET_DATE_ENV,
+        env={**TARGET_DATE_ENV, "SOURCE": "fhv_hv"},
     )
 
     # DQ 门控 — ODS 之后（行数非空 + 月度波动，FAIL 阻断 DWD）

@@ -1,7 +1,7 @@
 # TLC Trip Data Pipeline — PySpark + Kafka + Airflow
 
 A local batch and streaming data pipeline built on NYC TLC Q1 2024 trip records:
-Yellow taxi, Green taxi, and FHV rideshare (Uber/Lyft) — 3 sources, ~10.5M raw rows.
+Yellow taxi, Green taxi, and FHV rideshare (Uber/Lyft) — 3 sources, Q1 2024 (Yellow ~10M + Green ~300K + FHV HV ~67M raw rows, ~78M total).
 Daily incremental ETL via `TARGET_DATE` env var; orchestrated by Airflow.
 
 ## Architecture
@@ -99,6 +99,8 @@ start → ods_ingest_yellow ─┐
 
 `{{ ds }}` (logical execution date = previous day) is passed as `TARGET_DATE` to each notebook via `env` in the BashOperator.
 
+**Note on `catchup=False`**: The DAG uses `catchup=False`, so Airflow does **not** automatically run historical Q1 2024 backfill. When the DAG is registered today, `{{ ds }}` resolves to *yesterday* (i.e., 2026-10-18, not a 2024 date). To process Q1 2024 data, trigger each date manually in the Airflow UI or run the notebooks directly with `export TARGET_DATE=2024-01-01`.
+
 ## Setup
 
 ### Prerequisites
@@ -173,7 +175,7 @@ jupyter nbconvert --to notebook --execute --inplace \
 | trip_miles > 0 | FHV HV | ODS | ✅ PASS — bad=100 (<1%) |
 | driver_pay >= 0 | FHV HV | ODS | ✅ PASS — bad=6 (<1%) |
 | request_datetime ≤ pickup_datetime | FHV HV | ODS | ✅ PASS — bad=7,085 (<1%) |
-| fact_trips >= ODS_all × 0.80 | All | DWD | ✅ PASS |
+| fact + dwd_cleaning == ods_all (true conservation, no silent drops) | All | DWD | ✅ PASS |
 | PULocationID in dim_zone | All | DWD | ✅ PASS |
 
 **Quarantine rate: 1.27% overall** (Yellow/Green 2.90%, FHV HV 0.98%)
