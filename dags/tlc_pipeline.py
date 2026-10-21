@@ -3,7 +3,7 @@ TLC 出行数据管道 Airflow DAG
 
 任务依赖：
   ods_yellow ─┐
-  ods_green  ─┼─ dq_after_ods ─ dwd_build ─ dq_after_dwd ─ dws_build ─ dq_after_dws ─ ads_metrics
+  ods_green  ─┼─ dq_after_ods ─ dwd_build ─ dq_after_dwd ─ dws_build ─ dq_after_dws ─ ads_metrics ─ ads_borough
   ods_fhv    ─┘
 
 DQ 检查作为门控节点：FAIL 则抛出异常，下游任务不执行，脏数据不会污染后续层。
@@ -171,7 +171,20 @@ with DAG(
         append_env=True,
     )
 
+    # ADS 层：行政区 × 工作日/周末 × 来源汇总表（全量重算，无日期分区，幂等）
+    ads_borough = BashOperator(
+        task_id="ads_borough",
+        bash_command=(
+            f"{NBCONVERT} {NOTEBOOKS}/07b_ads_borough.ipynb "
+            "--ExecutePreprocessor.kernel_name=tlc-spark "
+            f"--output /tmp/07b_ads_borough_{{{{ ds_nodash }}}}.ipynb"
+        ),
+        env=TARGET_DATE_ENV,
+        append_env=True,
+        retries=0,
+    )
+
     end = EmptyOperator(task_id="end")
 
     # 依赖关系：DQ 作为门控节点，每层之后立即检查
-    start >> [ods_yellow, ods_green, ods_fhv] >> dq_after_ods >> dwd_build >> dq_after_dwd >> dws_build >> dq_after_dws >> ads_metrics >> end
+    start >> [ods_yellow, ods_green, ods_fhv] >> dq_after_ods >> dwd_build >> dq_after_dwd >> dws_build >> dq_after_dws >> ads_metrics >> ads_borough >> end
