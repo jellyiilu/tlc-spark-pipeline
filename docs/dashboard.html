@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TLC Q1 2024 Pipeline</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  --bg: #F4F7FB;
+  --surface: #FFFFFF;
+  --surface2: #EDF1F8;
+  --border: #DDE3EF;
+  --fg: #181E2C;
+  --fg2: #4B5A72;
+  --fg3: #8898B4;
+  --taxi: #DBA90F;
+  --fhv: #3D7EF7;
+  --green-t: #25B96A;
+  --warn-c: #D97706;
+  --pass-c: #0D9858;
+  --fail-c: #DC2626;
+  --font-d: 'Syne', sans-serif;
+  --font: 'Inter', system-ui, sans-serif;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1018; --surface: #131923; --surface2: #1A2233; --border: #273347;
+    --fg: #DCE5F5; --fg2: #8DA3C0; --fg3: #4D6B90;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0C1018; --surface: #131923; --surface2: #1A2233; --border: #273347;
+  --fg: #DCE5F5; --fg2: #8DA3C0; --fg3: #4D6B90;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--fg);
+  padding-inline: clamp(16px, 4vw, 36px);
+  padding-block: 28px;
+  max-width: 1160px;
+  margin-inline: auto;
+}
+h1, h2, h3 { text-wrap: balance; }
+.page-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 28px;
+}
+.page-title {
+  font-family: var(--font-d); font-size: clamp(1.7rem, 4vw, 2.5rem);
+  font-weight: 800; letter-spacing: -0.025em; line-height: 1.05;
+}
+.page-title .accent { color: var(--taxi); }
+.page-sub { font-size: 0.80rem; color: var(--fg3); margin-top: 5px; line-height: 1.5; }
+.badge-row { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.badge {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  padding: 4px 11px; border-radius: 100px;
+  background: var(--surface2); color: var(--fg3); border: 1px solid var(--border); white-space: nowrap;
+}
+.badge.ok { background: #D1FAE5; color: #065F46; border-color: #6EE7B7; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .badge.ok { background: #052e16; color: #6ee7b7; border-color: #065f46; }
+}
+:root[data-theme="dark"] .badge.ok { background: #052e16; color: #6ee7b7; border-color: #065f46; }
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+@media (max-width: 680px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px 16px; }
+.kpi-label { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg3); margin-bottom: 7px; }
+.kpi-value { font-family: var(--font-d); font-size: clamp(1.5rem, 2.8vw, 2.1rem); font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+.kpi-value.yellow { color: var(--taxi); }
+.kpi-value.blue   { color: var(--fhv); }
+.kpi-value.green  { color: var(--pass-c); }
+.kpi-sub { font-size: 0.72rem; color: var(--fg3); margin-top: 6px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 20px 22px; }
+.section-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+.section-title { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg3); }
+.section-note  { font-size: 0.75rem; color: var(--fg3); }
+.two-col { display: grid; grid-template-columns: 3fr 2fr; gap: 18px; margin-bottom: 20px; align-items: start; }
+@media (max-width: 740px) { .two-col { grid-template-columns: 1fr; } }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; }
+.legend-item { display: flex; align-items: center; gap: 7px; font-size: 0.76rem; color: var(--fg2); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.81rem; }
+th { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg3); text-align: left; padding: 0 0 8px; border-bottom: 1px solid var(--border); }
+th:not(:first-child) { text-align: right; }
+td { padding: 8px 0; border-bottom: 1px solid var(--surface2); color: var(--fg); font-variant-numeric: tabular-nums; }
+td:not(:first-child) { text-align: right; color: var(--fg2); }
+td:first-child { font-weight: 600; }
+tr:last-child td { border-bottom: none; }
+.borough-bar-row { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
+.b-row { display: flex; align-items: center; gap: 10px; }
+.b-name { font-size: 0.76rem; font-weight: 600; width: 90px; flex-shrink: 0; color: var(--fg); }
+.b-bar-track { flex: 1; height: 10px; background: var(--surface2); border-radius: 5px; overflow: hidden; min-width: 0; }
+.b-bar-fill { height: 100%; border-radius: 5px; }
+.b-trips { font-size: 0.72rem; color: var(--fg3); font-variant-numeric: tabular-nums; width: 52px; text-align: right; flex-shrink: 0; }
+.b-note { font-size: 0.62rem; color: var(--fg3); cursor: default; margin-left: 3px; }
+.dq-stats { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.dq-stat { flex: 1; min-width: 90px; text-align: center; padding: 14px 12px; background: var(--surface2); border-radius: 8px; }
+.dq-stat-n { font-family: var(--font-d); font-size: 1.7rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+.dq-stat-n.pass { color: var(--pass-c); }
+.dq-stat-n.warn { color: var(--warn-c); }
+.dq-stat-n.fail { color: var(--fail-c); }
+.dq-stat-lbl { font-size: 0.68rem; color: var(--fg3); margin-top: 4px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.warn-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.warn-item { display: grid; grid-template-columns: 68px auto 1fr auto; align-items: center; gap: 10px; padding: 8px 14px; background: var(--surface2); border-radius: 6px; font-size: 0.78rem; }
+@media (max-width: 560px) { .warn-item { grid-template-columns: auto auto; grid-template-rows: auto auto; } .warn-desc { grid-column: 1 / -1; } }
+.warn-date { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--fg); }
+.warn-rule { display: inline-flex; align-items: center; justify-content: center; font-size: 0.63rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .warn-rule { background: #2D1A04; color: #FCD34D; border-color: #78350F; } }
+:root[data-theme="dark"] .warn-rule { background: #2D1A04; color: #FCD34D; border-color: #78350F; }
+.warn-desc { color: var(--fg2); min-width: 0; }
+.warn-rate { font-weight: 700; color: var(--warn-c); font-variant-numeric: tabular-nums; text-align: right; }
+footer { margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 0.73rem; color: var(--fg3); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+
+<header class="page-header">
+  <div>
+    <div class="page-title">NYC TLC <span class="accent">Q1 2024</span></div>
+    <div class="page-sub">PySpark 3.5.1 · Airflow 2.9.3 · Kafka 3.7.1 · 91-day backfill + Spark Streaming</div>
+  </div>
+  <div class="badge-row">
+    <span class="badge ok">&#10003; 0 Blocking DQ Failures</span>
+    <span class="badge">Jan 1 &ndash; Mar 31 2024</span>
+  </div>
+</header>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">Total Trips</div><div class="kpi-value blue">69.5M</div><div class="kpi-sub">3 sources &middot; 91 days</div></div>
+  <div class="kpi"><div class="kpi-label">Total GMV</div><div class="kpi-value yellow">$2.11B</div><div class="kpi-sub">Yellow + Green + FHV HV</div></div>
+  <div class="kpi"><div class="kpi-label">DQ Checks</div><div class="kpi-value">2,093</div><div class="kpi-sub">2,058 pass &middot; 14 warn &middot; 0 fail</div></div>
+  <div class="kpi"><div class="kpi-label">Clean Rate</div><div class="kpi-value green">99.3%</div><div class="kpi-sub">69.5M of 70.0M ODS rows kept</div></div>
+</div>
+
+<div class="card" style="margin-bottom:20px">
+  <div class="section-head">
+    <span class="section-title">Daily Trip Volume</span>
+    <span class="section-note">stacked by source &middot; Jan 1 &ndash; Mar 31 &middot; peak Mar 9: 1.01M (Saturday); busiest 5 days all Saturdays</span>
+  </div>
+  <canvas id="dailyChart"></canvas>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#3D7EF7"></div>FHV / Rideshare (86.7%)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#DBA90F"></div>Yellow Taxi (13.1%)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#25B96A"></div>Green Taxi (0.2%)</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <div class="section-head"><span class="section-title">Trips by Borough</span><span class="section-note">Q1 2024 &middot; all sources combined</span></div>
+    <div class="borough-bar-row" id="boroughBars"></div>
+  </div>
+  <div class="card">
+    <div class="section-head"><span class="section-title">Borough KPIs</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Borough</th><th>Trips</th><th>GMV</th><th>Avg Fare</th><th>Tip %</th></tr></thead>
+        <tbody id="boroughTable"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-head">
+    <span class="section-title">Data Quality</span>
+    <span class="section-note">3 DQ gates (ODS &rarr; DWD &rarr; DWS) &middot; 19 rules &middot; 91 days &middot; no day blocked</span>
+  </div>
+  <div class="dq-stats">
+    <div class="dq-stat"><div class="dq-stat-n pass">2,058</div><div class="dq-stat-lbl">Pass</div></div>
+    <div class="dq-stat"><div class="dq-stat-n warn">14</div><div class="dq-stat-lbl">Warn</div></div>
+    <div class="dq-stat"><div class="dq-stat-n fail">0</div><div class="dq-stat-lbl">Block</div></div>
+    <div class="dq-stat"><div class="dq-stat-n" style="color:var(--fg2)">21</div><div class="dq-stat-lbl">Skip</div></div>
+  </div>
+  <div class="section-head" style="margin-bottom:12px">
+    <span class="section-title">Warning Events</span>
+    <span class="section-note">all severity=warn &middot; pipeline continued unblocked</span>
+  </div>
+  <ul class="warn-list" id="warnList"></ul>
+</div>
+
+<footer>
+  <span>tlc-spark-pipeline &middot; <a href="https://github.com/jellyiilu/tlc-spark-pipeline" style="color:inherit">github.com/jellyiilu/tlc-spark-pipeline</a></span>
+  <span>NYC TLC open data &middot; Q1 2024 &middot; ODS 70.0M &rarr; fact_trips 69.5M (0.75% rejected)</span>
+</footer>
+
+<script>
+const fhv = [638150,478133,498196,572492,656478,708860,542642,519437,624121,567079,608089,683354,752524,676684,559111,616356,679534,683765,738397,824460,677692,570854,588332,621524,652795,715208,752010,702656,550743,582572,609104,646654,743000,780484,646699,562226,586464,604848,655568,738969,777161,709957,598503,507803,743678,696273,731232,779155,682019,552626,576035,601691,665128,714249,793946,673202,565769,636985,665542,709898,760909,869707,664266,578149,662043,719211,670603,736791,884255,672132,593802,578426,619920,672831,739978,780997,651615,569919,595750,634672,678941,743941,874981,681234,569075,592512,641438,711427,717962,749036,658335];
+const yel  = [74376,71992,78848,98705,98655,92478,64234,76614,89180,91209,100620,99041,100054,89632,73619,88899,105096,105518,91817,103140,79983,81771,95673,101045,105512,101163,105615,87772,80936,97164,98049,105353,100938,105451,83965,84745,97982,98723,109105,105159,106482,91284,88213,66122,115940,116036,100116,99053,87684,72157,92891,99303,110351,97781,111310,89933,82128,111109,106661,122361,110985,114323,91050,89673,106765,123803,115301,112659,128893,96582,93130,105971,113368,129031,121063,123054,96753,90352,105734,113987,125295,111671,116456,97187,89225,107973,116061,126847,114406,107532,93789];
+const grn  = [1075,1520,1646,1943,1961,1476,1046,1803,1904,1854,1941,1907,1570,1317,1206,1769,2101,1949,1824,1558,1294,1737,1764,1888,1916,1865,1464,1306,1855,1857,1935,1917,1926,1570,1264,1834,1879,1822,1997,1975,1577,1341,1840,984,2189,2064,1845,1412,1334,1417,1668,1690,1830,1631,1455,1234,1739,1886,1989,2098,1917,1506,1320,1778,1830,2144,1984,1920,1615,1317,1701,1753,1940,1978,1868,1546,1291,1739,1845,1907,1990,1811,1306,1262,1672,1816,1878,1979,1683,1393,1368];
+
+const labels = [];
+const d0 = new Date('2024-01-01T12:00:00');
+for (let i = 0; i < 91; i++) {
+  const d = new Date(d0); d.setDate(d.getDate() + i);
+  labels.push(d.toLocaleDateString('en-US', {month:'short', day:'numeric'}));
+}
+
+new Chart(document.getElementById('dailyChart').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [
+      { label:'FHV / Rideshare', data: fhv.map(v=>v/1000), fill:true, backgroundColor:'rgba(61,126,247,0.18)', borderColor:'#3D7EF7', borderWidth:1.5, tension:0.35, pointRadius:0, pointHoverRadius:0 },
+      { label:'Yellow Taxi',     data: yel.map(v=>v/1000), fill:true, backgroundColor:'rgba(219,169,15,0.22)',  borderColor:'#DBA90F', borderWidth:1.5, tension:0.35, pointRadius:0, pointHoverRadius:0 },
+      { label:'Green Taxi',      data: grn.map(v=>v/1000), fill:true, backgroundColor:'rgba(37,185,106,0.25)',  borderColor:'#25B96A', borderWidth:1.5, tension:0.35, pointRadius:0, pointHoverRadius:0 },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: true, aspectRatio: 3.2,
+    interaction: { mode:'index', intersect:false },
+    scales: {
+      x: { stacked:true, ticks:{ color:'#8898B4', font:{size:11}, maxTicksLimit:10, maxRotation:0 }, grid:{ color:'rgba(136,152,180,0.10)' }, border:{ color:'transparent' } },
+      y: { stacked:true, min: 0, ticks:{ color:'#8898B4', font:{size:11}, callback: v => v+'K' }, grid:{ color:'rgba(136,152,180,0.10)' }, border:{ color:'transparent' } }
+    },
+    plugins: {
+      legend: { display:false },
+      tooltip: { backgroundColor:'#1A2233', titleColor:'#DCE5F5', bodyColor:'#8DA3C0', borderColor:'#273347', borderWidth:1, callbacks:{ label: ctx => ` ${ctx.dataset.label}: ${ctx.raw.toFixed(1)}K` } }
+    }
+  }
+});
+
+const boroughs = [
+  {b:'Manhattan',    trips:32113623, gmv:1043.9, avg_fare:24.25, tip:7.5,  color:'#3D7EF7'},
+  {b:'Brooklyn',     trips:15993507, gmv:407.5,  avg_fare:21.33, tip:3.8,  color:'#DBA90F'},
+  {b:'Queens',       trips:13017517, gmv:470.4,  avg_fare:28.80, tip:5.9,  color:'#25B96A'},
+  {b:'Bronx',        trips:7471116,  gmv:167.0,  avg_fare:19.02, tip:1.7,  color:'#A855F7'},
+  {b:'Staten Island',trips:875161,   gmv:22.4,   avg_fare:21.06, tip:4.0,  color:'#F97316'},
+  {b:'Other',        trips:31430,    gmv:1.0,    avg_fare:null,  tip:null, color:'#64748B', note:'264 Unknown · 265 Outside NYC · 1 EWR'},
+];
+const maxTrips = boroughs[0].trips;
+const barsEl = document.getElementById('boroughBars');
+boroughs.forEach(b => {
+  const pct = (b.trips / maxTrips * 100).toFixed(1);
+  const ts = b.trips >= 1e6 ? (b.trips/1e6).toFixed(1)+'M' : (b.trips/1000).toFixed(0)+'K';
+  barsEl.innerHTML += `<div class="b-row"><div class="b-name">${b.b}${b.note ? `<span class="b-note" title="${b.note}">ⓘ</span>` : ''}</div><div class="b-bar-track"><div class="b-bar-fill" style="width:${pct}%;background:${b.color}"></div></div><div class="b-trips">${ts}</div></div>`;
+});
+
+const tbody = document.getElementById('boroughTable');
+boroughs.forEach(b => {
+  const tr = document.createElement('tr');
+  const ts = b.trips >= 1e6 ? (b.trips/1e6).toFixed(2)+'M' : (b.trips/1000).toFixed(1)+'K';
+  tr.innerHTML = `<td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${b.color};margin-right:6px;vertical-align:middle"></span>${b.b}</td><td>${ts}</td><td>$${b.gmv.toFixed(1)}M</td><td>${b.avg_fare != null ? '$'+b.avg_fare.toFixed(2) : '&mdash;'}</td><td>${b.tip != null ? b.tip.toFixed(1)+'%' : '&mdash;'}</td>`;
+  tbody.appendChild(tr);
+});
+
+const warnings = [
+  {date:'2024-01-08', rule:'Vol 0b',  desc:'Green taxi count vs same weekday &minus;1 wk (New Year echo)',   rate:0.642},
+  {date:'2024-01-09', rule:'Vol 0b',  desc:'FHV count vs same weekday &minus;1 wk',                          rate:0.305},
+  {date:'2024-01-14', rule:'Vol 0b',  desc:'Yellow count vs same weekday &minus;1 wk',                       rate:0.398},
+  {date:'2024-01-15', rule:'Vol 0b',  desc:'Green count vs same weekday &minus;1 wk',                        rate:0.318},
+  {date:'2024-01-22', rule:'Vol 0b',  desc:'Green count vs same weekday &minus;1 wk',                        rate:0.405},
+  {date:'2024-02-13', rule:'Vol 0b',  desc:'Yellow + Green count drop (Feb 13 snowstorm)',                   rate:0.470},
+  {date:'2024-02-20', rule:'Vol 0b',  desc:'Yellow + Green count vs &minus;1 wk (snowstorm echo)',           rate:0.695},
+  {date:'2024-03-09', rule:'Rule 5',  desc:'passenger_count null rate &gt;15% (tag-only, not quarantined)',  rate:0.194},
+  {date:'2024-03-23', rule:'Rule 5',  desc:'passenger_count null rate &gt;15% (tag-only, not quarantined)',  rate:0.189},
+  {date:'2024-03-28', rule:'Rule 5',  desc:'passenger_count null rate &gt;15% (tag-only, not quarantined)',  rate:0.178},
+  {date:'2024-03-29', rule:'Rule 5',  desc:'passenger_count null rate &gt;15% (tag-only, not quarantined)',  rate:0.153},
+  {date:'2024-03-31', rule:'Rule 5',  desc:'passenger_count null rate &gt;15% &mdash; rising upstream trend',rate:0.161},
+];
+const warnList = document.getElementById('warnList');
+warnings.forEach(w => {
+  const dateStr = new Date(w.date + 'T12:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  const li = document.createElement('li');
+  li.className = 'warn-item';
+  li.innerHTML = `<span class="warn-date">${dateStr}</span><span class="warn-rule">${w.rule}</span><span class="warn-desc">${w.desc}</span><span class="warn-rate">${(w.rate*100).toFixed(1)}%</span>`;
+  warnList.appendChild(li);
+});
+</script>
+</body>
+</html>
