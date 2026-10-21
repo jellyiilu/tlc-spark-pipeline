@@ -55,8 +55,8 @@ data/warehouse/ods/yellow/   (ODS — uncleaned; producer reads ODS so streaming
                               consumer applies its own cleaning, making offline
                               vs streaming reconciliation meaningful)
                                  ↓
-08_kafka_producer.ipynb      Replay ODS records → Kafka at 20ms intervals,
-                              keyed by PULocationID
+08_kafka_producer.ipynb      Replay one hour of ODS records in event-time order
+                              (+ heartbeat) → Kafka, keyed by PULocationID
                                  ↓
 Kafka topic: tlc-trips       3 partitions · localhost:9092 · KRaft mode
                                  ↓
@@ -85,7 +85,7 @@ Kafka topic: tlc-trips       3 partitions · localhost:9092 · KRaft mode
 | 06 | `06_dq_after_dws.ipynb` | DQ Gate 3 | Rule 17: DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
 | 07 | `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, govt_surcharge_rate (government fees / fare), fhv_platform_take_rate (1 - driver_pay / fare, FHV HV only), tip_rate, avg_fare, avg_distance, avg_duration; dynamic partition overwrite |
 | 07b | `07b_ads_borough.ipynb` | ADS | Full Q1 recompute (no date partition): DWS × dim_zone × dim_date via broadcast join → kpi_by_borough with 6 additive columns (trip_count, gmv, fare_sum, tip_sum, distance_sum, duration_sum) + derived avg_fare/tip_rate/avg_miles/avg_min; conservation check asserts sum(trip_count) unchanged; borough Unknown/N/A = TLC reserved IDs 264–265 |
-| 08 | `08_kafka_producer.ipynb` | Stream | Replay ODS yellow records to Kafka at 20ms intervals, keyed by PULocationID |
+| 08 | `08_kafka_producer.ipynb` | Stream | Replay one hour of ODS yellow records in event-time order (+ watermark heartbeat) → Kafka, keyed by PULocationID |
 | 09 | `09_spark_streaming.ipynb` | Stream | Subscribe to tlc-trips → 5-min event-time tumbling window by PULocationID → foreachBatch write Parquet + reconcile vs offline DWD |
 
 ## Airflow DAG
@@ -163,6 +163,14 @@ jupyter nbconvert --to notebook --execute --inplace \
 
 ## Results (Q1 2024, 91-day backfill)
 
+### Exported CSVs (`results/`)
+
+| File | Rows | Contents |
+|---|---|---|
+| `results/kpi_daily.csv` | 273 | ADS daily KPIs (trip_count, GMV, rates) by pickup_date × source_type |
+| `results/kpi_by_borough.csv` | 55 | ADS borough KPIs by borough × service_zone × day_type × source_type |
+| `results/dq_rule_summary.csv` | 23 | DQ rule stats per gate × rule_id × severity: n / pass / warn / fail / skip / bad_rate min–max |
+
 ### Layer reconciliation — 91 days × 3 sources, zero drift
 
 `check_layers.py` verifies per (day × source): `ODS = fact + rejected`, `fact = DWS`, `DWS = ADS`.
@@ -224,7 +232,7 @@ Replayed yellow-taxi ODS records for 2024-03-15 08:00–09:00 into Kafka (3 part
 | N/A | 3,836 | $0.2M |
 | EWR | 72 | $6K |
 
-`Unknown` (location_id 265) and `N/A` (location_id 264) are TLC reserved IDs for trips with no assignable NYC zone; `EWR` (location_id 1) is Newark Airport; none are data quality issues.
+`Unknown` (location_id 264) = location unknown; `N/A` (location_id 265, zone "Outside of NYC") = pickup outside NYC boundaries; `EWR` (location_id 1) is Newark Airport; none are data quality issues.
 
 Both dimension joins use `F.broadcast()` (dim_zone 265 rows, dim_date 91 rows) to avoid shuffle.
 

@@ -134,7 +134,7 @@ with DAG(
         retries=0,
     )
 
-    # DWS 层：日粒度聚合（含加盐两阶段），只处理 TARGET_DATE
+    # DWS 层：日期 × 上车区域 × 来源 聚合，只处理 TARGET_DATE
     dws_build = BashOperator(
         task_id="dws_build",
         bash_command=(

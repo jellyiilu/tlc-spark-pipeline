@@ -1,13 +1,7 @@
-# 原始数据 + 中间层（太大，不上传）
-data/raw/
-data/processed/
-data/streaming/
-data/warehouse/ods/
-data/warehouse/dwd/
+# 数据文件（全部忽略，结果用 results/ 下的 CSV 替代）
+data/
 
-# 结果层（DWS / ADS / DQ）已纳入版本控制，无需忽略
-
-# Spark 输出的 CRC 校验文件（不需要跟踪）
+# Spark 输出的 CRC 校验文件
 **/.*.crc
 
 # Jupyter 检查点
