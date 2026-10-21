@@ -36,7 +36,7 @@ data/warehouse/dwd/      fact_trips / dim_zone / dim_date
                               FAIL blocks DWS
                                  ↓
 05_dws_build.ipynb       DWS: daily zone-level aggregation
-                              salt-based two-phase aggregation for hotspot skew
+                              (pickup_date × PULocationID × source_type)
                                  ↓
 data/warehouse/dws/      trips_daily (partitioned by year/month/day)
                                  ↓
@@ -81,7 +81,7 @@ Kafka topic: tlc-trips       3 partitions · localhost:9092 · KRaft mode
 | 02 | `02_dq_after_ods.ipynb` | DQ Gate 1 | Partition non-empty per source; daily count vs 7-day rolling avg ≤30% — FAIL blocks DWD |
 | 03 | `03_dwd_build.ipynb` | DWD | Unify FHV HV field names → clean → derive columns → write fact_trips + dim_zone + dim_date; dynamic partition overwrite |
 | 04 | `04_dq_after_dwd.ipynb` | DQ Gate 2 | 16 rules: Rules 1–10 Yellow/Green (completeness/range/temporal), Rules 11–12 DWD (true row conservation via DWD_CLEANING / referential integrity), Rules 13–16 FHV HV parity (trip_time/miles/driver_pay/request_after_pickup); passenger_count null tagged not quarantined — FAIL blocks DWS |
-| 05 | `05_dws_build.ipynb` | DWS | Daily zone-level aggregation; salt-based two-phase aggregation for hotspot skew |
+| 05 | `05_dws_build.ipynb` | DWS | Daily zone-level aggregation by pickup_date × PULocationID × source_type |
 | 06 | `06_dq_after_dws.ipynb` | DQ Gate 3 | Rule 17: DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
 | 07 | `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, govt_surcharge_rate (government fees / fare), fhv_platform_take_rate (1 - driver_pay / fare, FHV HV only), tip_rate, avg_fare, avg_distance, avg_duration; dynamic partition overwrite |
 | 08 | `08_kafka_producer.ipynb` | Stream | Replay ODS yellow records to Kafka at 20ms intervals, keyed by PULocationID |
