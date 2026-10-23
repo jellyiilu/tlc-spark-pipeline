@@ -1,5 +1,7 @@
 # TLC Trip Data Pipeline — PySpark + Kafka + Airflow
 
+**[→ Live Dashboard](https://jellyiilu.github.io/tlc-spark-pipeline)**
+
 A local batch and streaming data pipeline built on NYC TLC Q1 2024 trip records:
 Yellow taxi, Green taxi, and FHV rideshare (Uber/Lyft) — 3 sources, Q1 2024 (~70.0M raw rows: Yellow ~9.55M + Green ~0.17M + FHV HV ~60.30M).
 Daily incremental ETL via `TARGET_DATE` env var; orchestrated by Airflow.
