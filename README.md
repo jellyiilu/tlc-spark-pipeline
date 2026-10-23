@@ -2,6 +2,8 @@
 
 **[→ Live Dashboard](https://jellyiilu.github.io/tlc-spark-pipeline)**
 
+![dashboard](docs/dashboard.png)
+
 A local batch and streaming data pipeline built on NYC TLC Q1 2024 trip records:
 Yellow taxi, Green taxi, and FHV rideshare (Uber/Lyft) — 3 sources, Q1 2024 (~70.0M raw rows: Yellow ~9.55M + Green ~0.17M + FHV HV ~60.30M).
 Daily incremental ETL via `TARGET_DATE` env var; orchestrated by Airflow.
@@ -21,8 +23,8 @@ data/raw/yellow/        data/raw/green/        data/raw/fhv_hv/
                                  ↓
 data/warehouse/ods/      Partitioned by pickup_year / pickup_month / pickup_day
                                  ↓
-02_dq_after_ods.ipynb    DQ Gate 1: partition non-empty per source;
-                              daily count vs 7-day avg ≤30% — FAIL blocks DWD
+02_dq_after_ods.ipynb    DQ Gate 1: rule 0a partition non-empty (FAIL blocks DWD);
+                              rule 0b vs same weekday last week ±30% — WARN only
                                  ↓
 03_dwd_build.ipynb       DWD: unify FHV HV field names → clean → derive cols
                               → star schema (fact_trips + dim_zone + dim_date)
@@ -30,11 +32,10 @@ data/warehouse/ods/      Partitioned by pickup_year / pickup_month / pickup_day
                                  ↓
 data/warehouse/dwd/      fact_trips / dim_zone / dim_date
                                  ↓
-04_dq_after_dwd.ipynb    DQ Gate 2: 16 rules — completeness / range / temporal
-                              / row conservation / referential integrity
-                              FHV HV parity: trip_time, trip_miles, driver_pay,
-                              request_datetime order; passenger_count null → tag
-                              only (not quarantined); violations → quarantine table
+04_dq_after_dwd.ipynb    DQ Gate 2: Rules 1–16 — completeness / range / temporal
+                              / row conservation / referential integrity / FHV parity;
+                              Rule 5 + 16 are WARN not FAIL;
+                              quarantine table written by 03 (DWD), not here
                               FAIL blocks DWS
                                  ↓
 05_dws_build.ipynb       DWS: daily zone-level aggregation
@@ -44,10 +45,17 @@ data/warehouse/dws/      trips_daily (partitioned by year/month/day)
                                  ↓
 06_dq_after_dws.ipynb    DQ Gate 3: DWS trip_count ≈ fact_trips ±0.1% — FAIL blocks ADS
                                  ↓
-07_ads_metrics.ipynb     ADS: KPI (trip_count, GMV, surcharge_rate, tip_rate,
+07_ads_metrics.ipynb     ADS: KPI (trip_count, GMV, govt_surcharge_rate,
+                              fhv_platform_take_rate, tip_rate,
                               avg_fare, avg_distance, avg_duration)
                                  ↓
 data/warehouse/ads/      kpi_daily
+                                 ↓
+07b_ads_borough.ipynb    ADS: borough × service_zone × day_type × source_type
+                              via broadcast join (dim_zone + dim_date);
+                              conservation check asserts sum(trip_count) unchanged
+                                 ↓
+data/warehouse/ads/      kpi_by_borough
 ```
 
 ### Streaming pipeline (08 → 09)
@@ -73,16 +81,16 @@ Kafka topic: tlc-trips       3 partitions · localhost:9092 · KRaft mode
 - **Kafka 3.7.1** — message broker (KRaft mode, no ZooKeeper)
 - **Airflow 2.9.3** — DAG orchestration, retry, backfill (`{{ ds }}` → TARGET_DATE)
 - **kafka-python** — producer client
-- **pandas + pyarrow** — parquet I/O for Kafka producer
+- **pandas + pyarrow** — result CSV exports (`results/`); notebook 08 reads ODS via Spark
 
 ## Notebooks
 
 | # | Notebook | Layer | Description |
 |---|---|---|---|
 | 01 | `01_ods_ingest.ipynb` | ODS | Ingest Yellow + Green + FHV HV raw parquet → rename datetime fields → add source_type / ingestion_ts / partition cols → write partitioned ODS |
-| 02 | `02_dq_after_ods.ipynb` | DQ Gate 1 | Partition non-empty per source; daily count vs 7-day rolling avg ≤30% — FAIL blocks DWD |
+| 02 | `02_dq_after_ods.ipynb` | DQ Gate 1 | Rule 0a: partition non-empty per source — FAIL blocks DWD; Rule 0b: daily count vs same weekday last week ±30% — WARN only |
 | 03 | `03_dwd_build.ipynb` | DWD | Unify FHV HV field names → clean → derive columns → write fact_trips + dim_zone + dim_date; dynamic partition overwrite |
-| 04 | `04_dq_after_dwd.ipynb` | DQ Gate 2 | 16 rules: Rules 1–10 Yellow/Green (completeness/range/temporal), Rules 11–12 DWD (true row conservation via DWD_CLEANING / referential integrity), Rules 13–16 FHV HV parity (trip_time/miles/driver_pay/request_after_pickup); passenger_count null tagged not quarantined — FAIL blocks DWS |
+| 04 | `04_dq_after_dwd.ipynb` | DQ Gate 2 | Rules 1–16: completeness/range/temporal/row-conservation/referential-integrity/FHV-parity; Rule 5 (passenger_count null) and Rule 16 (FHV request_datetime) are WARN not FAIL; quarantine table written by 03 (DWD) — FAIL blocks DWS |
 | 05 | `05_dws_build.ipynb` | DWS | Daily zone-level aggregation by pickup_date × PULocationID × source_type |
 | 06 | `06_dq_after_dws.ipynb` | DQ Gate 3 | Rule 17: DWS trip_count == fact_trips count within 0.1% tolerance — FAIL blocks ADS |
 | 07 | `07_ads_metrics.ipynb` | ADS | KPI: trip_count, GMV, govt_surcharge_rate (government fees / fare), fhv_platform_take_rate (1 - driver_pay / fare, FHV HV only), tip_rate, avg_fare, avg_distance, avg_duration; dynamic partition overwrite |
@@ -92,11 +100,11 @@ Kafka topic: tlc-trips       3 partitions · localhost:9092 · KRaft mode
 
 ## Airflow DAG
 
-`dags/tlc_pipeline.py` — 9 tasks, daily schedule (`0 6 * * *`), `catchup=True`, `end_date=2024-03-31`, retry=2:
+`dags/tlc_pipeline.py` — 10 tasks, daily schedule (`0 6 * * *`), `catchup=True`, `end_date=2024-03-31`; default `retries=2`, DQ tasks and `ads_borough` use `retries=0`:
 
 ```
 start → ods_ingest_yellow ─┐
-      → ods_ingest_green  ─┼─ dq_after_ods → dwd_build → dq_after_dwd → dws_build → dq_after_dws → ads_metrics → end
+      → ods_ingest_green  ─┼─ dq_after_ods → dwd_build → dq_after_dwd → dws_build → dq_after_dws → ads_metrics → ads_borough → end
       → ods_ingest_fhv    ─┘
 ```
 
@@ -139,12 +147,13 @@ bash scripts/download_data.sh   # downloads Q1 2024 Yellow + Green + FHV HV (~1.
 ```bash
 export TARGET_DATE=2024-03-15
 for nb in 01_ods_ingest 02_dq_after_ods 03_dwd_build 04_dq_after_dwd \
-           05_dws_build 06_dq_after_dws 07_ads_metrics; do
+           05_dws_build 06_dq_after_dws 07_ads_metrics 07b_ads_borough; do
   jupyter nbconvert --to notebook --execute --inplace \
     --ExecutePreprocessor.kernel_name=tlc-spark \
     --ExecutePreprocessor.timeout=600 \
     notebooks/${nb}.ipynb
 done
+python check_layers.py
 ```
 
 ### Run streaming
@@ -201,7 +210,7 @@ Top rejection reasons (yellow): zero distance 42.6%, non-positive fare (refunds/
 | Yellow | 9.08M | $250M | $18.70 | 17.9%* | — |
 | Green | 0.15M | $3.5M | $16.76 | 14.3%* | — |
 
-\* Taxi cash tips are not recorded. Platform take rate = 1 − driver_pay / base_passenger_fare.
+\* Taxi cash tips are recorded as 0, so taxi tip rates are understated. Platform take rate = 1 − driver_pay / base_passenger_fare.
 
 ### Streaming vs offline reconciliation (Kafka + Spark 3.5.1)
 
@@ -234,7 +243,7 @@ Replayed yellow-taxi ODS records for 2024-03-15 08:00–09:00 into Kafka (3 part
 | N/A | 3,836 | $0.2M |
 | EWR | 72 | $6K |
 
-`Unknown` (location_id 264) = location unknown; `N/A` (location_id 265, zone "Outside of NYC") = pickup outside NYC boundaries; `EWR` (location_id 1) is Newark Airport; none are data quality issues.
+`Unknown` (location_id 264) = mild upstream data quality gap — pickup zone not captured (0.04% of trips, retained and flagged); `N/A` (location_id 265) = pickup outside NYC boundaries; `EWR` (location_id 1) = Newark Airport.
 
 Both dimension joins use `F.broadcast()` (dim_zone 265 rows, dim_date 91 rows) to avoid shuffle.
 
